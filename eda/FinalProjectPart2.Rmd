@@ -57,6 +57,7 @@ In order to get a better understanding or the relationship between features, we 
 classifications to get a better understanding f the relationships between features. Across almost all the figures, it is clear that the benign class has a lower mean,
 worst, and standard error when compared to the malignant group. In addition to that, it is common across features to see benign class with a smaller range than the 
 malignant class. This could indicate that variability beyond the expected range for the benign class could indicate cancer.
+
 ```{python}
 import matplotlib.pyplot as plt
 import pandas as pd
@@ -255,8 +256,11 @@ Kelvin : I employed the R programming language as the primary tool for data pre-
   to visualize the data distribution characteristics. I then conducted a factor analysis to identify underlying variables that explain the pattern 
   of correlations within a set of observed variables. To explore the predictive capabilities of the data, I implemented logistic regression. Finally, 
   I built a classification tree to understand what values may constitute a certain outcome.  
-Delia :
-Chelsea : Wrote the boxplot compare function, wrote the description of the graphs in that section. Combined the python code into the .Rmd file and submitted the url
+Delia : Review feedback from the proposal and worked to identify a new dataset. The dataset was larger but similar enough to approach the same problem of prediction 
+a cancer diagnosis beased on patient features. In addition to that I reviewed coding and EDA and provided feedback and siggestions for improvements before submission.
+Chelsea : I wrote a significant EDA template before reviewing that of my temmates. I was teh major force incombining efforts into a final document for submission. 
+The python code including where the boxplot compare function is implemented and the descriptions of the graphs in that section were included from my eda efforts also. 
+Finally submitted the link to the .rmd file on git.
 
 
 
