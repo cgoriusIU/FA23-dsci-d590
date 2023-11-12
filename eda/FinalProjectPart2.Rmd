@@ -1,0 +1,268 @@
+---
+title: "Final "
+author: "Kelvin Anderson"
+date: "`r Sys.Date()`"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+library(reticulate)
+use_python("/usr/local/bin/python")
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+```{r}
+library("rmarkdown")
+library("naniar")
+library("visdat")
+library("kableExtra")
+library("corrplot")
+library("rpart.plot")
+library("rpart")
+library("ggplot2")
+library("gridExtra")
+library(car)
+library(psych)
+library(tidyverse)  
+library(devtools)
+library("StepReg")
+```
+
+
+```{r}
+data_orig <- read.csv("data/breast-cancer.csv")
+str(data_orig)
+```
+
+```{r}
+vis_miss(data_orig, warn_large_data = FALSE)
+vis_dat(data_orig, warn_large_data = FALSE)
+```
+
+```{r}
+data1 <- data_orig[, -1]
+data1$diagnosis <- ifelse(data1$diagnosis == "B", 0, 1)
+data1$diagnosis <- as.factor(data1$diagnosis)
+str(data1)
+```
+
+```{r}
+kable(head(data1, 20)) %>% kable_styling(font_size = 10) %>% 
+  scroll_box(height = "500px")
+```
+
+# Comparing boxplots
+All of the features can be grouped into either a mean, worst, or standard error metric. For each category features there is one of each of those feature metrics.
+In order to get a better understanding or the relationship between features, we will create a set of boxplots for each feature type comparing malignant and bening 
+classifications to get a better understanding f the relationships between features. Across almost all the figures, it is clear that the benign class has a lower mean,
+worst, and standard error when compared to the malignant group. In addition to that, it is common across features to see benign class with a smaller range than the 
+malignant class. This could indicate that variability beyond the expected range for the benign class could indicate cancer.
+
+```{python}
+import matplotlib.pyplot as plt
+import pandas as pd
+import seaborn as sns
+
+df = pd.read_csv("../data/breast-cancer.csv")
+
+def boxplot_compare(df: pd.DataFrame, columns: [str]):
+  plt.figure(figsize=(12,6))
+  for col in df[columns].columns:
+    plt.subplot(1, len(df[columns].columns), df[columns].columns.get_loc(col) + 1)
+    sns.boxplot(x='diagnosis', y=col, data=df)
+    plt.title(f'{col} vs diagnosis')
+    plt.xticks(rotation=45)
+  plt.tight_layout()
+  plt.show()
+
+boxplot_compare(df, ['concavity_mean', 'concavity_worst', 'concavity_se'])
+boxplot_compare(df, ['perimeter_mean', 'perimeter_worst', 'perimeter_se'])
+boxplot_compare(df, ['texture_mean', 'texture_worst', 'texture_se'])
+boxplot_compare(df, ['radius_mean', 'radius_worst', 'radius_se'])
+boxplot_compare(df, ['fractal_dimension_mean', 'fractal_dimension_worst', 'fractal_dimension_se'])
+boxplot_compare(df, ['symmetry_mean', 'symmetry_worst', 'symmetry_se'])
+boxplot_compare(df, ['concave points_mean', 'concave points_worst', 'concave points_se'])
+boxplot_compare(df, ['area_mean', 'area_worst', 'area_se'])
+boxplot_compare(df, ['smoothness_mean', 'smoothness_worst', 'smoothness_se'])
+boxplot_compare(df, ['compactness_mean', 'compactness_worst', 'compactness_se'])
+```
+
+
+# Correlation plot
+```{r}
+data_matrix <- cor(data1[, -1])
+
+corrplot(data_matrix, order="hclust", type='upper',tl.srt = 45, tl.cex = 0.6)
+```
+The correlation plot shows multiple variables being highly correlated with 
+another. For example: radius mean and area mean is highly correlated, area mean 
+and perimeter mean is also highly correlated. 
+
+# Distribution of all numerical independent variable
+
+The original dataset has 30 independent variables. Below is a for loop that is 
+creating a histogram for all 30 independent variables. You may have to enlarge 
+the output to view all graphs. 
+
+```{r}
+plot_list <- list()
+number_of_variables <- ncol(data1)
+
+for(i in 2:number_of_variables) {
+  p <- ggplot(data1, aes_string(x = names(data1)[i])) +
+    geom_histogram(bins = 30) + 
+    ggtitle(paste("Histogram of", names(data1)[i]))
+  
+  plot_list[[i - 1]] <- p 
+}
+
+do.call(grid.arrange, c(plot_list, ncol = 5))
+```
+
+- Plot 1 is a scatter plot of radius mean and texture mean. 
+- Plot 2 is a box plot of the variable radius mean by diagnosis. 
+- Plot 3 is a violin plot of the variable radius mean by diagnosis. 
+- Plot 4 is a faceted scatter plot for radius mean vs texture mean by diagnosis. 
+
+```{r}
+ggplot(data1, aes(x = radius_mean, y = texture_mean, color = diagnosis)) +
+  geom_point() +
+  ggtitle("Scatter Plot of Radius Mean vs Texture Mean")
+
+ggplot(data1, aes(x = diagnosis, y = radius_mean)) +
+  geom_boxplot() +
+  ggtitle("Box Plot of Radius Mean by Diagnosis")
+
+ggplot(data1, aes(x = diagnosis, y = radius_mean)) +
+  geom_violin() +
+  ggtitle("Violin Plot of Radius Mean by Diagnosis")
+
+ggplot(data1, aes(x = radius_mean, y = texture_mean)) +
+  geom_point() +
+  facet_wrap(~ diagnosis) +
+  ggtitle("Faceted Scatter Plots for Radius Mean vs Texture Mean")
+```
+
+# VIF
+```{r}
+model <- glm(diagnosis ~., data = data1, family = binomial())
+vif(model)
+```
+
+# Factor Analysis
+```{r}
+data_fa <- data1[,-1]
+datamatrix <- cor(data_fa)
+KMO(r=datamatrix)
+```
+Since MSA = 0.83 > 0.5, we can run Factor Analysis. 
+
+
+```{r}
+cortest.bartlett(datamatrix, nrow(data1))
+```
+With a Chi-square value of 39362.12 and df of 435, it is significant with an 
+alpha value of 0.05. 
+
+```{r}
+ev <- eigen(cor(data_fa))
+ev$values
+
+Factor = c(1:30)
+Eigen_Values <-ev$values
+Scree <- data.frame(Factor, Eigen_Values)
+plot(Scree, main = "Scree Plot", col= "Blue",ylim=c(0,4))
+lines(Scree,col='Red')
+abline(h = 1, col="Green")
+```
+
+### Diagram
+```{r}
+fa_var <-  fa(r=data_fa, nfactors = 4, rotate="varimax",fm="pa")
+fa.diagram(fa_var)
+```
+
+# PCA
+
+```{r}
+scaled_df <- apply(data1[, -1], 2, scale)
+dt = head(scaled_df)
+kbl(dt)%>%
+  kable_styling(bootstrap_options = c("striped", "hover"))
+```
+
+```{r}
+data.cov <- cov(scaled_df)
+data.eigen <- eigen(data.cov)
+str(data.eigen)
+```
+
+```{r}
+phi <- data.eigen$vectors[,1:2]
+print(phi)
+```
+
+```{r}
+PC1 <- as.matrix(scaled_df) %*% phi[,1]
+PC2 <- as.matrix(scaled_df) %*% phi[,2]
+
+PC <- data.frame(x = row.names(data1), PC1, PC2)
+head(PC)
+```
+
+```{r}
+ggplot(PC, aes(PC1, PC2)) + 
+  modelr::geom_ref_line(h = 0) +
+  modelr::geom_ref_line(v = 0) +
+  geom_text(aes(label = x), size = 3) +
+  xlab("First Principal Component") + 
+  ylab("Second Principal Component") + 
+  ggtitle("First Two Principal Components of Breast Cancer")
+```
+
+
+# Logistic Regression 
+```{r}
+data2 <- data1[, c(1:7)]
+set.seed(123)
+dt <- sort(sample(nrow(data2), nrow(data2) *.70))
+train <- data2[dt,]
+test <- data2[-dt,] 
+
+model <- glm(diagnosis ~ ., data = train, family = binomial(link = "logit"))
+summary(model)
+
+vif(model)
+```
+
+## Forward Selection Method 
+```{r}
+stepwiseLogit(diagnosis ~ ., data = train, selection = "forward", select = "SL", sle = 0.05)
+```
+
+# Classification Tree
+
+```{r}
+dt <- sort(sample(nrow(data2), nrow(data2) *.7))
+train <- data2[dt,]
+test <- data2[-dt,]
+rtree <- rpart(diagnosis ~ ., data2, method = "class")
+rpart.plot(rtree)
+```
+
+# Personal contribution Statements
+Kelvin : I employed the R programming language as the primary tool for data pre-processing, ensuring the data was clean and suitable for analysis. 
+  My initial exploratory data analysis included creating correlation plots to understand the relationships between variables and distribution plots
+  to visualize the data distribution characteristics. I then conducted a factor analysis to identify underlying variables that explain the pattern 
+  of correlations within a set of observed variables. To explore the predictive capabilities of the data, I implemented logistic regression. Finally, 
+  I built a classification tree to understand what values may constitute a certain outcome.  
+Delia : Review feedback from the proposal and worked to identify a new dataset. The dataset was larger but similar enough to approach the same problem of prediction 
+a cancer diagnosis beased on patient features. In addition to that I reviewed coding and EDA and provided feedback and siggestions for improvements before submission.
+Chelsea : I wrote a significant EDA template before reviewing that of my temmates. I was teh major force incombining efforts into a final document for submission. 
+The python code including where the boxplot compare function is implemented and the descriptions of the graphs in that section were included from my eda efforts also. 
+Finally submitted the link to the .rmd file on git.
+
+
+
+
+
