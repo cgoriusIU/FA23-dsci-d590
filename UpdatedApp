@@ -1,0 +1,383 @@
+```{r}
+library("rmarkdown")
+library("naniar")
+library("visdat")
+library("kableExtra")
+library("corrplot")
+library("rpart.plot")
+library("rpart")
+library("ggplot2")
+library("gridExtra")
+library(car)
+library(psych)
+library(tidyverse)  
+library(devtools)
+library("StepReg")
+library(shiny)
+library(plotly)
+library(DT)
+```
+
+
+```{r}
+data_orig <- read.csv("breast-cancer.csv")
+str(data_orig)
+```
+
+```{r}
+vis_miss(data_orig, warn_large_data = FALSE)
+vis_dat(data_orig, warn_large_data = FALSE)
+```
+
+```{r}
+data1 <- data_orig[, -1]
+data1$diagnosis <- ifelse(data1$diagnosis == "B", 0, 1)
+data1$diagnosis <- as.factor(data1$diagnosis)
+str(data1)
+```
+
+```{r}
+kable(head(data1, 20)) %>% kable_styling(font_size = 10) %>% 
+  scroll_box(height = "500px")
+```
+
+# Correlation plot
+```{r}
+data_matrix <- cor(data1[, -1])
+
+corrplot(data_matrix, order="hclust", type='upper',tl.srt = 45, tl.cex = 0.6)
+```
+The correlation plot shows multiple variables being highly correlated with 
+another. For example: radius mean and area mean is highly correlated, area mean 
+and perimeter mean is also highly correlated. 
+
+# Distribution of all numerical independent variable
+
+The original dataset has 30 independent variables. Below is a for loop that is 
+creating a histogram for all 30 independent variables. You may have to enlarge 
+the output to view all graphs. 
+
+```{r}
+plot_list <- list()
+number_of_variables <- ncol(data1)
+
+for(i in 2:number_of_variables) {
+  p <- ggplot(data1, aes_string(x = names(data1)[i])) +
+    geom_histogram(bins = 30) + 
+    ggtitle(paste("Histogram of", names(data1)[i]))
+  
+  plot_list[[i - 1]] <- p 
+}
+
+do.call(grid.arrange, c(plot_list, ncol = 5))
+```
+
+- Plot 1 is a scatter plot of radius mean and texture mean. 
+- Plot 2 is a box plot of the variable radius mean by diagnosis. 
+- Plot 3 is a violin plot of the variable radius mean by diagnosis. 
+- Plot 4 is a faceted scatter plot for radius mean vs texture mean by diagnosis. 
+
+```{r}
+ggplot(data1, aes(x = radius_mean, y = texture_mean, color = diagnosis)) +
+  geom_point() +
+  ggtitle("Scatter Plot of Radius Mean vs Texture Mean")
+
+ggplot(data1, aes(x = diagnosis, y = radius_mean)) +
+  geom_boxplot() +
+  ggtitle("Box Plot of Radius Mean by Diagnosis")
+
+ggplot(data1, aes(x = diagnosis, y = radius_mean)) +
+  geom_violin() +
+  ggtitle("Violin Plot of Radius Mean by Diagnosis")
+
+ggplot(data1, aes(x = radius_mean, y = texture_mean)) +
+  geom_point() +
+  facet_wrap(~ diagnosis) +
+  ggtitle("Faceted Scatter Plots for Radius Mean vs Texture Mean")
+```
+
+# VIF
+```{r}
+model <- glm(diagnosis ~., data = data1, family = binomial())
+vif(model)
+```
+
+# Factor Analysis
+```{r}
+data_fa <- data1[,-1]
+datamatrix <- cor(data_fa)
+KMO(r=datamatrix)
+```
+Since MSA = 0.83 > 0.5, we can run Factor Analysis. 
+
+
+```{r}
+cortest.bartlett(datamatrix, nrow(data1))
+```
+With a Chi-square value of 39362.12 and df of 435, it is significant with an 
+alpha value of 0.05. 
+
+```{r}
+ev <- eigen(cor(data_fa))
+ev$values
+
+Factor = c(1:30)
+Eigen_Values <-ev$values
+Scree <- data.frame(Factor, Eigen_Values)
+plot(Scree, main = "Scree Plot", col= "Blue",ylim=c(0,4))
+lines(Scree,col='Red')
+abline(h = 1, col="Green")
+```
+
+### Diagram
+```{r}
+fa_var <-  fa(r=data_fa, nfactors = 4, rotate="varimax",fm="pa")
+fa.diagram(fa_var)
+```
+
+# PCA
+
+```{r}
+scaled_df <- apply(data1[, -1], 2, scale)
+dt = head(scaled_df)
+kbl(dt)%>%
+  kable_styling(bootstrap_options = c("striped", "hover"))
+```
+
+```{r}
+data.cov <- cov(scaled_df)
+data.eigen <- eigen(data.cov)
+str(data.eigen)
+```
+
+```{r}
+phi <- data.eigen$vectors[,1:2]
+print(phi)
+```
+
+```{r}
+PC1 <- as.matrix(scaled_df) %*% phi[,1]
+PC2 <- as.matrix(scaled_df) %*% phi[,2]
+
+PC <- data.frame(x = row.names(data1), PC1, PC2)
+head(PC)
+```
+
+```{r}
+ggplot(PC, aes(PC1, PC2)) + 
+  modelr::geom_ref_line(h = 0) +
+  modelr::geom_ref_line(v = 0) +
+  geom_text(aes(label = x), size = 3) +
+  xlab("First Principal Component") + 
+  ylab("Second Principal Component") + 
+  ggtitle("First Two Principal Components of Breast Cancer")
+```
+
+
+# Logistic Regression 
+```{r}
+data2 <- data1[, c(1:7)]
+set.seed(123)
+dt <- sort(sample(nrow(data2), nrow(data2) *.70))
+train <- data2[dt,]
+test <- data2[-dt,] 
+
+model <- glm(diagnosis ~ ., data = train, family = binomial(link = "logit"))
+summary(model)
+
+vif(model)
+```
+
+## Forward Selection Method 
+```{r}
+stepwiseLogit(diagnosis ~ ., data = train, selection = "forward", select = "SL", sle = 0.05)
+```
+
+# Classification Tree
+
+```{r}
+dt <- sort(sample(nrow(data2), nrow(data2) *.7))
+train <- data2[dt,]
+test <- data2[-dt,]
+rtree <- rpart(diagnosis ~ ., data2, method = "class")
+rpart.plot(rtree)
+```
+
+
+
+```{r}
+ui <- fluidPage(
+  titlePanel("Breast Cancer Diagnostic Analysis Dashboard"),
+  
+  sidebarLayout(
+    sidebarPanel(
+      selectInput("predictors", "Choose predictor variables", choices = names(data1)[-1], multiple = TRUE)),
+    
+    mainPanel(
+      tabsetPanel(
+        tabPanel("Statistics and Variable Distribution", 
+                 plotOutput("histPlot"),
+                 DTOutput("summaryTable")),
+        tabPanel("Correlation Plot", plotOutput("corPlot")),
+        tabPanel("Classification Tree", plotOutput("classTree")),
+        tabPanel("Detailed Analysis",
+                 fluidRow(
+                   column(6,
+                          selectInput("scatterX", "Select X-axis variable for scatter plot", choices = names(data1)[-1]),
+                          selectInput("scatterY", "Select Y-axis variable for scatter plot", choices = names(data1)[-1]),
+                          plotOutput("scatterPlot")),
+                   column(6,
+                          selectInput("boxVariable", "Select variable for box plot", choices = names(data1)[-1]),
+                          plotOutput("boxPlot"),
+                          selectInput("violinVariable", "Select variable for violin plot", choices = names(data1)[-1]),
+                          plotOutput("violinPlot"))
+                 )
+        ),
+        tabPanel("Logistic Regression Model",
+                 fluidRow(
+                   column(6,
+                          selectInput("logitPredictors", "Choose predictors for logistic regression", choices = names(data1)[-1], multiple = TRUE),
+                          actionButton("buildLogitModel", "Build Logistic Regression Model")),
+                   column(6,
+                          verbatimTextOutput("logitModelSummary"),
+                          hr(), 
+                          h4("Enter values for prediction:"), 
+                          uiOutput("predictionFields"), 
+                          textOutput("probabilityOutput")
+                          )
+                 )
+        )
+      )
+    )
+  )
+)
+
+
+server <- function(input, output) {
+
+    output$histPlot <- renderPlot({
+        req(input$predictors)
+        ggplot(data1, aes_string(x = input$predictors[[1]])) + 
+            geom_histogram(bins = 30, fill = 'blue', alpha = 0.7) +
+            theme_minimal() +
+            labs(x = input$predictors[[1]], y = "Count")
+    })
+    
+    # Scatter Plot
+    output$scatterPlot <- renderPlot({
+      req(input$scatterX, input$scatterY) 
+      ggplot(data1, aes_string(x = input$scatterX, y = input$scatterY, color = 'diagnosis')) +
+      geom_point() +
+      theme_minimal() +
+      labs(x = input$scatterX, y = input$scatterY, title = "Scatter Plot") +
+      ggtitle(paste("Scatter Plot of", input$scatterX, "vs", input$scatterY, "by Diagnosis"))
+})
+
+# Box Plot
+    output$boxPlot <- renderPlot({
+      req(input$boxVariable) # Ensure that the variable is selected
+      ggplot(data1, aes_string(x = 'diagnosis', y = input$boxVariable)) +
+      geom_boxplot() +
+      theme_minimal() +
+      labs(y = input$boxVariable) +
+      ggtitle(paste("Box Plot of", input$boxVariable, "by Diagnosis"))
+})
+
+# Violin Plot
+    output$violinPlot <- renderPlot({
+      req(input$violinVariable) # Ensure that the variable is selected
+      ggplot(data1, aes_string(x = 'diagnosis', y = input$violinVariable)) +
+      geom_violin(trim = FALSE) +
+      theme_minimal() +
+      labs(y = input$violinVariable) +
+      ggtitle(paste("Violin Plot of", input$violinVariable, "by Diagnosis"))
+})
+
+    
+    output$summaryTable <- renderDT({
+        req(input$predictors)  
+        data_selected <- select(data1, all_of(input$predictors))
+        data_summary <- sapply(data_selected, summary) %>% as.data.frame()
+        datatable(data_summary, options = list(pageLength = 5))
+    })
+    
+ 
+    
+    output$corPlot <- renderPlot({
+        data_matrix <- cor(data1[, -1])  
+        corrplot(data_matrix, order="hclust", type='upper', tl.srt = 45, tl.cex = 0.6)
+    })
+    
+    output$classTree <- renderPlot({
+      dt <- sort(sample(nrow(data1), nrow(data1) *.7))
+      train <- data1[dt,]
+      test <- data1[-dt,]
+      rtree <- rpart(diagnosis ~ ., data1, method = "class")
+      rpart.plot(rtree)
+    })
+    
+    output$logitModelSummary <- renderPrint({
+      req(input$logitPredictors)
+      
+      formula <- as.formula(paste("diagnosis ~", paste(input$logitPredictors, collapse = " + ")))
+      model <- glm(formula, data = data1, family = "binomial")
+      
+      cat("Odds of Diagnosis = 1:", exp(coef(model)[1]), "\n\n")
+      
+      for (i in seq_along(input$logitPredictors)) {
+        cat("Odds Ratio for", input$logitPredictors[i], ":",
+          exp(coef(model)[i + 1]), "\n")
+  }
+      summary(model)
+    })
+    
+    
+    observeEvent(input$buildLogitModel, {
+      req(input$logitPredictors)
+      
+      formula <- as.formula(paste("diagnosis ~", paste(input$logitPredictors, collapse = " + ")))
+      model <- glm(formula, data = data1, family = "binomial")
+      
+      output$logitModelSummary <- renderPrint({
+        cat("Odds of Diagnosis = 1:", exp(coef(model)[1]), "\n\n")
+        for (i in seq_along(input$logitPredictors)) {
+          cat("Odds Ratio for", input$logitPredictors[i], ":",
+            exp(coef(model)[i + 1]), "\n")
+        }
+    
+        summary(model)
+      })
+      
+      output$inputFields <- renderUI({
+        inputFields <- lapply(input$logitPredictors, function(var) {
+          numericInput(var, label = var, value = 0)
+        })
+        do.call(tagList, inputFields)
+      })
+      
+      output$predictionFields <- renderUI({
+        inputFields <- lapply(input$logitPredictors, function(var) {
+          numericInput(paste0("pred_", var), label = var, value = 0)
+        })
+        do.call(tagList, inputFields)
+      })
+      
+      output$probabilityOutput <- renderText({
+        input_values <- sapply(input$logitPredictors, function(var) {
+           input[[paste0("pred_", var)]]
+        })
+        
+        linear_predictor <- coef(model)[1] + sum(coef(model)[-1] * input_values)
+        probability <- exp(linear_predictor) / (1 + exp(linear_predictor))
+        paste("Probability of Diagnosis = 1:", round(probability, 3))
+      })
+      
+      
+    })
+    
+    
+
+        
+}
+shinyApp(ui = ui, server = server)
+```
